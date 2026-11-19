@@ -40,7 +40,7 @@ jobs:
       - name: Run Python Unit Tests (pytest)
         run: |
           python -m pip install --quiet pytest boto3
-          pytest -v
+          python -m pytest -v
       - uses: opentofu/setup-opentofu@v1
       - name: tofu fmt -check
         run: tofu fmt -check -recursive
