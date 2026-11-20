@@ -28,6 +28,7 @@ data "terraform_remote_state" "shared" {
 }
 
 locals {
+  ecs_cluster_name   = try(data.terraform_remote_state.shared.outputs.ecs_cluster_name, var.ecs_cluster_name)
   eks_cluster_name   = try(data.terraform_remote_state.shared.outputs.eks_cluster_name, var.eks_cluster_name)
   kms_master_key_arn = try(data.terraform_remote_state.shared.outputs.kms_master_key_arn, null)
 
@@ -84,6 +85,17 @@ data "aws_iam_policy_document" "finops_manager_least_privilege" {
   }
 
   statement {
+    sid    = "EcsServicesParkUnpark"
+    effect = "Allow"
+    actions = [
+      "ecs:ListServices",
+      "ecs:DescribeServices",
+      "ecs:UpdateService"
+    ]
+    resources = ["*"]
+  }
+
+  statement {
     sid    = "EksNodeGroupParkUnpark"
     effect = "Allow"
     actions = [
@@ -129,7 +141,7 @@ resource "aws_cloudwatch_log_group" "finops_manager" {
 # trivy:ignore:AVD-AWS-0066 X-Ray tracing omitted in FinOps MVP to avoid extra tracing fees
 resource "aws_lambda_function" "finops_manager" {
   function_name    = "pfm-finops-manager"
-  description      = "FinOps Park (20:30 BRT) & Unpark (06:00 BRT) for PFM EKS NodeGroup and RDS"
+  description      = "FinOps Park (20:30 BRT) & Unpark (06:00 BRT) for PFM ECS Services, EKS NodeGroup and RDS"
   role             = aws_iam_role.finops_manager_lambda.arn
   handler          = "handler.lambda_handler"
   runtime          = "python3.12"
@@ -141,6 +153,7 @@ resource "aws_lambda_function" "finops_manager" {
 
   environment {
     variables = {
+      ECS_CLUSTER_NAME   = local.ecs_cluster_name
       EKS_CLUSTER_NAME   = local.eks_cluster_name
       EKS_NODEGROUP_NAME = var.eks_nodegroup_name
       RDS_INSTANCE_ID    = var.rds_instance_id
@@ -157,6 +170,7 @@ resource "aws_lambda_function" "finops_manager" {
 
 # =============================================================================
 # 4. EventBridge Scheduler (Park 20:30 BRT & Unpark 06:00 BRT)
+# Governance: Defaults to DISABLED (enable_nightly_schedule = false)
 # =============================================================================
 
 data "aws_iam_policy_document" "scheduler_assume" {
@@ -193,10 +207,10 @@ resource "aws_iam_role_policy" "scheduler_invoke_lambda" {
 
 resource "aws_scheduler_schedule" "park_nightly_2030" {
   name                         = "pfm-finops-park-nightly-2030"
-  description                  = "Park EKS NodeGroup (0 nodes) and stop RDS daily at 20:30 America/Sao_Paulo"
+  description                  = "Park ECS Services, EKS NodeGroup (0 nodes) and stop RDS daily at 20:30 America/Sao_Paulo"
   schedule_expression          = "cron(30 20 * * ? *)"
   schedule_expression_timezone = "America/Sao_Paulo"
-  state                        = "ENABLED"
+  state                        = var.enable_nightly_schedule ? "ENABLED" : "DISABLED"
 
   flexible_time_window {
     mode = "OFF"
@@ -211,10 +225,10 @@ resource "aws_scheduler_schedule" "park_nightly_2030" {
 
 resource "aws_scheduler_schedule" "unpark_morning_0600" {
   name                         = "pfm-finops-unpark-morning-0600"
-  description                  = "Start RDS and restore EKS NodeGroup (1..2 nodes) daily at 06:00 America/Sao_Paulo"
+  description                  = "Start RDS, restore EKS NodeGroup and ECS services daily at 06:00 America/Sao_Paulo"
   schedule_expression          = "cron(0 6 * * ? *)"
   schedule_expression_timezone = "America/Sao_Paulo"
-  state                        = "ENABLED"
+  state                        = var.enable_nightly_schedule ? "ENABLED" : "DISABLED"
 
   flexible_time_window {
     mode = "OFF"

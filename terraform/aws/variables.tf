@@ -10,6 +10,12 @@ variable "environment" {
   default     = "prod"
 }
 
+variable "ecs_cluster_name" {
+  description = "ECS Cluster name managed by FinOps Manager"
+  type        = string
+  default     = "pfm-pilot-prod"
+}
+
 variable "eks_cluster_name" {
   description = "EKS Cluster name managed by FinOps Manager"
   type        = string
@@ -32,4 +38,10 @@ variable "shared_state_bucket" {
   description = "S3 bucket storing pfm-shared-infra remote state"
   type        = string
   default     = "sorobanerp-pfm-tfstate-us-east-2-366476833548"
+}
+
+variable "enable_nightly_schedule" {
+  description = "Whether to enable nightly park/unpark EventBridge schedules (default: false for controlled manual review)"
+  type        = bool
+  default     = false
 }
