@@ -11,27 +11,21 @@ variable "environment" {
 }
 
 variable "ecs_cluster_name" {
-  description = "ECS Cluster name managed by FinOps Manager"
+  description = "ECS Fargate Spot Cluster name managed by FinOps Manager"
   type        = string
-  default     = "pfm-pilot-prod"
-}
-
-variable "eks_cluster_name" {
-  description = "EKS Cluster name managed by FinOps Manager"
-  type        = string
-  default     = "pfm-eks-prod"
-}
-
-variable "eks_nodegroup_name" {
-  description = "EKS Managed Node Group name managed by FinOps Manager"
-  type        = string
-  default     = "pfm-eks-prod-graviton-mvp"
+  default     = "pfm-ecs-pilot"
 }
 
 variable "rds_instance_id" {
-  description = "RDS PostgreSQL DB instance identifier managed by FinOps Manager"
+  description = "RDS PostgreSQL 16 DB instance identifier managed by FinOps Manager"
   type        = string
   default     = "pfm-core-ledger-prod"
+}
+
+variable "ai_worker_function_name" {
+  description = "AI Worker AWS Lambda function name managed by FinOps Manager"
+  type        = string
+  default     = "pfm-ai-worker-python-prod"
 }
 
 variable "shared_state_bucket" {
