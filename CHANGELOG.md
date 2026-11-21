@@ -6,8 +6,16 @@ Todas as alterações notáveis neste repositório são documentadas neste arqui
 
 ## [Unreleased]
 
-### Added
-- Padronização de governança DevEx (`README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`) e workflow de validação de **Conventional Commits** em Pull Requests para `develop` e `main`.
+---
+
+## [0.4.0] - 2026-11-21
+
+### Changed
+- Refatoração completa de `src/finops_manager/handler.py` eliminando 100% do gerenciamento legado de NodeGroups EKS/AutoScaling e direcionando `stop`, `start`, `status` e `audit` exclusivamente para o cluster ECS Fargate Spot (`pfm-ecs-pilot`), instância RDS PostgreSQL 16 (`pfm-core-ledger-prod`) e função AWS Lambda (`pfm-ai-worker-python-prod`).
+- Adicionado controle opcional de concorrência (`freeze_lambda` via `PutFunctionConcurrency` / `DeleteFunctionConcurrency`) sobre `pfm-ai-worker-python-prod` e guardrails de auditoria (`cost_guardrails`) para alertar sobre qualquer cluster EKS ou NAT Gateway ativo na região `us-east-2`.
+
+### Security
+- Política IAM Least Privilege (`pfm-finops-manager-least-privilege`) restrita aos ARNs reais da conta `366476833548` (`arn:aws:ecs:us-east-2:366476833548:cluster/pfm-ecs-pilot`, `service/pfm-ecs-pilot/*`, `arn:aws:rds:us-east-2:366476833548:db:pfm-*`, `arn:aws:lambda:us-east-2:366476833548:function:pfm-ai-worker*`).
 
 ---
 
