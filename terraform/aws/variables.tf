@@ -39,3 +39,9 @@ variable "enable_nightly_schedule" {
   type        = bool
   default     = false
 }
+
+variable "enable_cloudwatch_logs" {
+  description = "Disable AWS CloudWatch Logs by default (FinOps ADR-010: use Datadog JSON stdout instead of CloudWatch)"
+  type        = bool
+  default     = false
+}

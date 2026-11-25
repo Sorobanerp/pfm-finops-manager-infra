@@ -142,6 +142,7 @@ resource "aws_iam_role_policy" "finops_manager_least_privilege" {
 }
 
 resource "aws_cloudwatch_log_group" "finops_manager" {
+  count             = var.enable_cloudwatch_logs ? 1 : 0
   name              = "/aws/lambda/pfm-finops-manager"
   retention_in_days = 14
   kms_key_id        = local.kms_master_key_arn
@@ -170,13 +171,13 @@ resource "aws_lambda_function" "finops_manager" {
       ECS_CLUSTER_NAME        = local.ecs_cluster_name
       RDS_INSTANCE_ID         = var.rds_instance_id
       AI_WORKER_FUNCTION_NAME = var.ai_worker_function_name
+      CLOUDWATCH_LOGS_ENABLED = "false"
     }
   }
 
   tags = local.common_tags
 
   depends_on = [
-    aws_cloudwatch_log_group.finops_manager,
     aws_iam_role_policy.finops_manager_least_privilege
   ]
 }
