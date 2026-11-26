@@ -14,6 +14,21 @@ from datetime import datetime, timezone
 from typing import Any
 
 
+EXPECTED_ECS_SERVICES: tuple[str, ...] = (
+    "pfm-core-ledger-java",
+    "pfm-forecast-engine-go",
+    "pfm-ingestion-bff-go",
+    "pfm-web-nextjs",
+)
+ELASTICACHE_REPLICATION_GROUP_ID = "pfm-forecast-valkey-prod"
+ZERO_CLOUDWATCH_LOG_PREFIXES: tuple[str, ...] = (
+    "/ecs/pfm",
+    "/aws/lambda/pfm",
+    "/aws/pfm",
+    "/aws/eks/pfm",
+)
+
+
 def _get_config() -> tuple[str, str, str, str]:
     region = os.environ.get("AWS_REGION", "us-east-2")
     ecs_cluster = os.environ.get("ECS_CLUSTER_NAME", "pfm-ecs-pilot")
@@ -29,7 +44,8 @@ def _get_clients(
     lambda_client: Any = None,
     ec2_client: Any = None,
     eks_client: Any = None,
-) -> tuple[Any, Any, Any, Any, Any]:
+    logs_client: Any = None,
+) -> tuple[Any, Any, Any, Any, Any, Any]:
     if (
         ecs_client is not None
         and rds_client is not None
@@ -37,7 +53,7 @@ def _get_clients(
         and ec2_client is not None
         and eks_client is not None
     ):
-        return ecs_client, rds_client, lambda_client, ec2_client, eks_client
+        return ecs_client, rds_client, lambda_client, ec2_client, eks_client, logs_client
 
     import boto3
 
@@ -46,7 +62,8 @@ def _get_clients(
     lmb = lambda_client or boto3.client("lambda", region_name=region)
     ec2 = ec2_client or boto3.client("ec2", region_name=region)
     eks = eks_client or getattr(boto3, "client")("eks", region_name=region)
-    return ecs, rds, lmb, ec2, eks
+    logs = logs_client or getattr(boto3, "client")("logs", region_name=region)
+    return ecs, rds, lmb, ec2, eks, logs
 
 
 def _describe_ecs_services(ecs: Any, ecs_cluster: str) -> list[dict[str, Any]]:
@@ -90,10 +107,11 @@ def _describe_ai_worker_lambda(lmb: Any, function_name: str) -> dict[str, Any]:
         }
 
 
-def _check_cost_guardrails(ec2: Any, eks: Any) -> dict[str, Any]:
+def _check_cost_guardrails(ec2: Any, eks: Any, logs: Any = None) -> dict[str, Any]:
     alerts: list[str] = []
     eks_clusters: list[str] = []
     active_nat_gateways: list[str] = []
+    residual_log_groups: list[str] = []
 
     if eks is not None:
         try:
@@ -118,9 +136,31 @@ def _check_cost_guardrails(ec2: Any, eks: Any) -> dict[str, Any]:
         except Exception:  # pylint: disable=broad-except
             active_nat_gateways = []
 
+    if logs is not None:
+        for prefix in ZERO_CLOUDWATCH_LOG_PREFIXES:
+            try:
+                lg_resp = logs.describe_log_groups(logGroupNamePrefix=prefix)
+                for lg in lg_resp.get("logGroups", []):
+                    lg_name = lg.get("logGroupName", "")
+                    if lg_name and lg_name not in residual_log_groups:
+                        residual_log_groups.append(lg_name)
+                        try:
+                            logs.put_retention_policy(logGroupName=lg_name, retentionInDays=1)
+                        except Exception:  # pylint: disable=broad-except
+                            pass
+            except Exception:  # pylint: disable=broad-except
+                pass
+        if residual_log_groups:
+            alerts.append(
+                f"ZERO_CLOUDWATCH_ALERT: Residual CloudWatch Log Groups detected (enforced 1-day min retention; forward to Datadog): {residual_log_groups}"
+            )
+
     return {
         "eks_clusters_detected": eks_clusters,
         "active_nat_gateways_detected": active_nat_gateways,
+        "residual_cloudwatch_log_groups": residual_log_groups,
+        "zero_cloudwatch_policy": os.environ.get("CLOUDWATCH_LOGS_ENABLED", "false").lower() == "false",
+        "datadog_service": os.environ.get("DD_SERVICE", "pfm-finops-manager"),
         "alerts": alerts,
     }
 
@@ -134,12 +174,18 @@ def _describe_state(
     ecs_cluster: str,
     rds_id: str,
     ai_worker_lambda: str,
+    logs: Any = None,
 ) -> dict[str, Any]:
     state: dict[str, Any] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "ecs": {
             "cluster_name": ecs_cluster,
+            "expected_services": list(EXPECTED_ECS_SERVICES),
             "services": _describe_ecs_services(ecs, ecs_cluster),
+        },
+        "elasticache": {
+            "replication_group_id": ELASTICACHE_REPLICATION_GROUP_ID,
+            "engine": "valkey",
         },
     }
 
@@ -161,7 +207,7 @@ def _describe_state(
         }
 
     state["ai_worker_lambda"] = _describe_ai_worker_lambda(lmb, ai_worker_lambda)
-    state["cost_guardrails"] = _check_cost_guardrails(ec2, eks)
+    state["cost_guardrails"] = _check_cost_guardrails(ec2, eks, logs=logs)
     return state
 
 
@@ -343,6 +389,7 @@ def lambda_handler(
     lambda_client: Any = None,
     ec2_client: Any = None,
     eks_client: Any = None,
+    logs_client: Any = None,
 ) -> dict[str, Any]:
     """Entry point for FinOps Manager Lambda supporting stop, start, status, and audit actions."""
     payload = event or {}
@@ -353,22 +400,27 @@ def lambda_handler(
     freeze_lambda = bool(payload.get("freeze_lambda", False))
 
     region, ecs_cluster, rds_id, ai_worker_lambda = _get_config()
-    ecs, rds, lmb, ec2, eks = _get_clients(
+    ecs, rds, lmb, ec2, eks, logs = _get_clients(
         region,
         ecs_client=ecs_client,
         rds_client=rds_client,
         lambda_client=lambda_client,
         ec2_client=ec2_client,
         eks_client=eks_client,
+        logs_client=logs_client,
     )
 
     if action == "status":
         body: dict[str, Any] = {
             "action": "status",
-            **_describe_state(ecs, rds, lmb, ec2, eks, ecs_cluster, rds_id, ai_worker_lambda),
+            **_describe_state(
+                ecs, rds, lmb, ec2, eks, ecs_cluster, rds_id, ai_worker_lambda, logs=logs
+            ),
         }
     elif action == "audit":
-        state = _describe_state(ecs, rds, lmb, ec2, eks, ecs_cluster, rds_id, ai_worker_lambda)
+        state = _describe_state(
+            ecs, rds, lmb, ec2, eks, ecs_cluster, rds_id, ai_worker_lambda, logs=logs
+        )
         body = _audit_resources(state)
     elif action == "stop":
         body = _park_resources(
@@ -392,4 +444,17 @@ def lambda_handler(
             ),
         }
 
+    print(
+        json.dumps(
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "level": "INFO",
+                "service": os.environ.get("DD_SERVICE", "pfm-finops-manager"),
+                "env": os.environ.get("DD_ENV", "prod"),
+                "version": os.environ.get("DD_VERSION", "3.0.3"),
+                "cloudwatch_logs_enabled": False,
+                "finops.action": action,
+            }
+        )
+    )
     return {"statusCode": 200, "body": json.dumps(body)}

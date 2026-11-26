@@ -70,17 +70,20 @@ resource "aws_iam_role" "finops_manager_lambda" {
   tags               = local.common_tags
 }
 
-# trivy:ignore:AVD-AWS-0057 Read-only cost audit actions (eks:ListClusters, ec2:DescribeNatGateways) require "*" in AWS IAM
 data "aws_iam_policy_document" "finops_manager_least_privilege" {
   statement {
-    sid    = "CloudWatchLogsWrite"
+    sid    = "ZeroCloudWatchAuditAndRetentionEnforcement"
     effect = "Allow"
     actions = [
-      "logs:CreateLogStream",
-      "logs:PutLogEvents"
+      "logs:DescribeLogGroups",
+      "logs:PutRetentionPolicy",
+      "logs:DeleteLogGroup"
     ]
     resources = [
-      "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/pfm-finops-manager:*"
+      "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/pfm*",
+      "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/pfm*",
+      "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/pfm*",
+      "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/eks/pfm*"
     ]
   }
 
@@ -94,7 +97,7 @@ data "aws_iam_policy_document" "finops_manager_least_privilege" {
     ]
     resources = [
       "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/${local.ecs_cluster_name}",
-      "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${local.ecs_cluster_name}/*"
+      "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${local.ecs_cluster_name}/pfm-*"
     ]
   }
 
@@ -107,7 +110,21 @@ data "aws_iam_policy_document" "finops_manager_least_privilege" {
       "rds:StopDBInstance"
     ]
     resources = [
+      "arn:aws:rds:${var.aws_region}:${data.aws_caller_identity.current.account_id}:db:${var.rds_instance_id}",
       "arn:aws:rds:${var.aws_region}:${data.aws_caller_identity.current.account_id}:db:pfm-*"
+    ]
+  }
+
+  statement {
+    sid    = "ElastiCacheValkeyReadOnlyAudit"
+    effect = "Allow"
+    actions = [
+      "elasticache:DescribeReplicationGroups",
+      "elasticache:DescribeCacheClusters"
+    ]
+    resources = [
+      "arn:aws:elasticache:${var.aws_region}:${data.aws_caller_identity.current.account_id}:replicationgroup:pfm-*",
+      "arn:aws:elasticache:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster:pfm-*"
     ]
   }
 
@@ -120,18 +137,27 @@ data "aws_iam_policy_document" "finops_manager_least_privilege" {
       "lambda:DeleteFunctionConcurrency"
     ]
     resources = [
+      "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${var.ai_worker_function_name}",
       "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:pfm-ai-worker*"
     ]
   }
 
   statement {
-    sid    = "ZeroCostGuardrailReadOnlyAudit"
+    sid    = "ZeroCostGuardrailScopedToProjectTag"
     effect = "Allow"
     actions = [
-      "eks:ListClusters",
+      "eks:DescribeCluster",
       "ec2:DescribeNatGateways"
     ]
-    resources = ["*"]
+    resources = [
+      "arn:aws:eks:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/pfm-*",
+      "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:natgateway/*"
+    ]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
   }
 }
 
@@ -172,6 +198,11 @@ resource "aws_lambda_function" "finops_manager" {
       RDS_INSTANCE_ID         = var.rds_instance_id
       AI_WORKER_FUNCTION_NAME = var.ai_worker_function_name
       CLOUDWATCH_LOGS_ENABLED = "false"
+      DD_SERVICE              = "pfm-finops-manager"
+      DD_ENV                  = var.environment
+      DD_VERSION              = "3.0.3"
+      DD_LOGS_INJECTION       = "true"
+      DD_TRACE_SAMPLE_RATE    = "0.10"
     }
   }
 
