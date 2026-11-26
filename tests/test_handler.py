@@ -124,6 +124,33 @@ def test_audit_raises_alerts_when_eks_or_nat_gateway_detected():
     assert any("NAT Gateways" in a for a in body["alerts"])
 
 
+def test_audit_detects_residual_cloudwatch_log_groups_and_enforces_min_retention():
+    ecs, rds, lmb, ec2, eks = _mock_clients(rds_status="available")
+    logs = MagicMock()
+    logs.describe_log_groups.side_effect = [
+        {"logGroups": [{"logGroupName": "/ecs/pfm-core-ledger-java-prod"}]},
+        {"logGroups": []},
+        {"logGroups": []},
+        {"logGroups": []},
+    ]
+    resp = lambda_handler(
+        {"action": "audit"},
+        ecs_client=ecs,
+        rds_client=rds,
+        lambda_client=lmb,
+        ec2_client=ec2,
+        eks_client=eks,
+        logs_client=logs,
+    )
+    assert resp["statusCode"] == 200
+    body = json.loads(resp["body"])
+    assert "/ecs/pfm-core-ledger-java-prod" in body["cost_guardrails"]["residual_cloudwatch_log_groups"]
+    assert any("ZERO_CLOUDWATCH_ALERT" in a for a in body["alerts"])
+    logs.put_retention_policy.assert_called_once_with(
+        logGroupName="/ecs/pfm-core-ledger-java-prod", retentionInDays=1
+    )
+
+
 def test_stop_parks_ecs_and_rds_without_freezing_lambda_by_default():
     ecs, rds, lmb, ec2, eks = _mock_clients(rds_status="available")
     resp = lambda_handler(
