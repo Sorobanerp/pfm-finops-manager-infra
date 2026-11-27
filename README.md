@@ -31,9 +31,9 @@ flowchart LR
 ### Variáveis de Ambiente (Sem Segredos Hardcoded)
 | Variável | Padrão | Descrição |
 | :--- | :---: | :--- |
-| `ECS_CLUSTER_NAME` | `pfm-pilot-prod` | Cluster ECS gerenciado |
-| `RDS_INSTANCE_ID` | `pfm-postgres-prod` | Instância RDS alvo |
-| `EKS_CLUSTER_NAME` | `pfm-eks-prod` | Cluster EKS (quando ativo) |
+| `ECS_CLUSTER_NAME` | `pfm-ecs-pilot` | Cluster ECS Fargate Spot gerenciado |
+| `RDS_INSTANCE_ID` | `pfm-core-ledger-prod` | Instância RDS PostgreSQL 16 alvo |
+| `AI_WORKER_FUNCTION_NAME` | `pfm-ai-worker-python-prod` | Função Lambda Arm64 do AI Worker |
 | `TF_VAR_enable_nightly_schedule` | `false` | Habilita/desabilita agendamentos EventBridge |
 
 > **Segurança (Zero-Trust):** Nunca commite tokens, senhas, chaves AWS ou strings de conexão com credenciais reais. Utilize `.env` local (ignorado no `.gitignore`) ou AWS Secrets Manager / GitHub OIDC.
