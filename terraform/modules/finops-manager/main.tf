@@ -1,7 +1,7 @@
 data "aws_caller_identity" "current" {}
 
 locals {
-  function_name = var.environment == "prod" ? "pfm-finops-manager" : "pfm-finops-manager-${var.environment}"
+  function_name = "pfm-finops-manager-${var.environment}"
 
   common_tags = {
     Service     = "pfm-finops-manager"

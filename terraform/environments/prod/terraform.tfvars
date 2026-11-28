@@ -4,7 +4,7 @@
 # =============================================================================
 environment             = "prod"
 aws_region              = "us-east-2"
-ecs_cluster_name        = "pfm-ecs-pilot"
+ecs_cluster_name        = "pfm-ecs-pilot-prod"
 rds_instance_id         = "pfm-core-ledger-prod"
 ai_worker_function_name = "pfm-ai-worker-python-prod"
 enable_nightly_schedule = false
